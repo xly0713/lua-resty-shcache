@@ -6,8 +6,9 @@
 local M = {}
 
 local resty_lock = require("resty.lock")
+local conf = require("conf")
 
-local DEBUG = false
+local DEBUG = conf.DEBUG or false
 
 -- defaults in secs
 local DEFAULT_POSITIVE_TTL = 10     -- cache for, successful lookup
@@ -27,14 +28,6 @@ local conf = require("conf")
 if conf then
    DEFAULT_NEGATIVE_TTL = conf.DEFAULT_NEGATIVE_TTL or DEFAULT_NEGATIVE_TTL
    DEFAULT_ACTUALIZE_TTL = conf.DEFAULT_ACTUALIZE_TTL or DEFAULT_ACTUALIZE_TTL
-end
-
-local locks = ngx.shared.locks
-
--- check for existence, locks is not directly used
-if not locks then
-   ngx.log(ngx.CRIT, 'shared mem locks is missing.')
-   return nil
 end
 
 local band = bit.band
@@ -74,7 +67,7 @@ if DEBUG then
    local resty_lock_lock = resty_lock.lock
 
    resty_lock.lock = function (...)
-      local _, key = unpack({...})
+      local _, key = ...
       print("lock key: ", tostring(key))
       return resty_lock_lock(...)
    end
@@ -115,14 +108,28 @@ end
 -- shdict: ngx.shared.DICT, created by the lua_shared_dict directive
 -- callbacks: see shcache state machine for user defined functions
 --    * callbacks.external_lookup is required
+--    * callbacks.external_lookup_arg is the (opaque) user argument for external_lookup
 --    * callbacks.encode    : optional encoding before saving to shmem
 --    * callbacks.decode    : optional decoding when retreiving from shmem
 -- opts:
---   * opts.positive_ttl    : save a valid external loookup for, in seconds
---   * opts.positive_ttl    : save a invalid loookup for, in seconds
+--
+-- The TTL values are passed directly to the ngx.shared.DICT.set
+-- function (see
+-- http://wiki.nginx.org/HttpLuaModule#ngx.shared.DICT.set for the
+-- documentation). But note that the value 0 does not mean "do not
+-- cache at all", it means "no expiry time".  So, for example, setting
+-- opts.negative_ttl to 0 means that a failed lookup will be cached
+-- forever.
+--
+--   * opts.positive_ttl    : save a valid external lookup for, in seconds
+--   * opts.negative_ttl    : save a invalid lookup for, in seconds
 --   * opts.actualize_ttl   : re-actualize a stale record for, in seconds
+--
 --   * opts.lock_options    : set option to lock see : http://github.com/agentzh/lua-resty-lock
 --                            for more details.
+--   * opts.locks_shdict    : specificy the name of the shdict containing the locks
+--                            (useful if you might have locks key collisions)
+--                            uses "locks" by default.
 --   * opts.name            : if shcache object is named, it will automatically
 --                            register itself in ngx.ctx.shcache (useful for logging).
 local function new(self, shdict, callbacks, opts)
@@ -167,12 +174,32 @@ local function new(self, shdict, callbacks, opts)
 
       lock_options = lock_options,
 
+      locks_shdict = opts.lock_shdict or "locks",
+
+      -- STATUS --
+
       from_cache = false,
+      cache_status = 'UNDEF',
       cache_state = MISS_STATE,
       lock_status = 'NO_LOCK',
 
+      -- shdict:set() pushed out another value
+      forcible_set = false,
+
+      -- cache hit on second attempt (post lock)
+      hit2 = false,
+
       name = name,
    }
+
+   local locks = ngx.shared[obj.locks_shdict]
+
+   -- check for existence, locks is not directly used
+   if not locks then
+      ngx.log(ngx.CRIT, 'shared mem locks is missing.\n',
+              '## add to you lua conf: lua_shared_dict locks 5M; ##')
+       return nil
+   end
 
    local self = setmetatable(obj, obj_mt)
 
@@ -187,11 +214,67 @@ local function new(self, shdict, callbacks, opts)
 end
 M.new = new
 
+local function _enter_critical_section(self)
+   if DEBUG then
+      print('Entering critical section, shcache: ', self.name or '')
+   end
+
+   self.in_critical_section = true
+
+   local critical_sections = ngx.ctx.critical_sections
+   if not critical_sections then
+      critical_sections = {
+         count = 1,
+         die = false,
+      }
+      ngx.ctx.critical_sections = critical_sections
+      return
+   end
+
+   -- TODO (mtourne): uncomment when ngx.thread.exit api exists.
+
+   -- prevents new thread to enter a critical section if we're set to die.
+   -- if critical_sections.die then
+   --    ngx.thread.exit()
+   -- end
+
+   critical_sections.count = critical_sections.count + 1
+   if DEBUG then
+      print('critical sections count: ', critical_sections.count)
+   end
+end
+
+local function _exit_critical_section(self)
+   if DEBUG then
+      print('Leaving critical section, shcache: ', self.name or '')
+   end
+
+   local critical_sections = ngx.ctx.critical_sections
+   if not critical_sections then
+      ngx.log(ngx.ERR, 'weird state: ngx.ctx.critical_sections missing')
+      return
+   end
+
+   critical_sections.count = critical_sections.count - 1
+
+   if DEBUG then
+      print('die: ', critical_sections.die, ', count: ', critical_sections.count)
+   end
+
+   if critical_sections.die and critical_sections.count <= 0 then
+      -- safe to exit.
+      if DEBUG then
+         print('Last critical section, exiting.')
+      end
+      ngx.exit(ngx.status)
+   end
+end
+
 -- acquire a lock
 local function _get_lock(self)
    local lock = self.lock
    if not lock then
-      lock = resty_lock:new("locks", self.lock_options)
+      lock = resty_lock:new(self.locks_shdict, self.lock_options)
       self.lock = lock
    end
    return lock
@@ -203,7 +286,7 @@ local function _unlock(self)
    if lock then
       local ok, err = lock:unlock()
       if not ok then
-         ngx.log(ngx.CRIT, "failed to unlock :" , err)
+         ngx.log(ngx.ERR, "failed to unlock :" , err)
       end
       self.lock = nil
    end
@@ -222,20 +305,30 @@ local function _return(self, data, flags)
 
    self.cache_status = cache_status
 
+   if self.in_critical_section then
+      -- data has been cached, and lock on key is removed
+      -- this is the end of the critical section.
+      _exit_critical_section(self)
+   end
+
    return data, self.from_cache
 end
 
 local function _set(self, ...)
    if DEBUG then
-      local key, data, ttl, flags = unpack({...})
+      local key, data, ttl, flags = ...
       print("saving key: ", key, ", for: ", ttl)
    end
 
-   local ok, err = self.shdict:set(...)
+   local ok, err, forcible = self.shdict:set(...)
+
+   self.forcible_set = forcible
+
    if not ok then
-      local key, data, ttl, flags = unpack({...})
+      local key, data, ttl, flags = ...
       ngx.log(ngx.ERR, 'failed to set key: ', key, ', err: ', err)
    end
+
    return ok
 end
 
@@ -320,6 +413,8 @@ end
 
 local function load(self, key)
    -- start: check for existing cache
+   -- clear previous data stored in stale_data
+   self.stale_data = nil
    local data, flags = _get(self, key)
 
    -- hit: process_cache_hit
@@ -333,42 +428,54 @@ local function load(self, key)
    -- lock: set a lock before performing external lookup
    local lock = _get_lock(self)
    local elapsed, err = lock:lock(key)
-;
+
    if not elapsed then
       -- failed to acquire lock, still proceed normally to external_lookup
       -- unlock() might fail.
-      ngx.log(ngx.CRIT, "failed to acquire the lock: ", err)
-
+      ngx.log(ngx.ERR, "failed to acquire the lock: ", err)
+      self.lock_status = 'ERROR'
+      -- _unlock won't try to unlock() without a valid lock
+      self.lock = nil
    else
-      -- lock acquired
+      -- lock acquired successfuly
 
       if elapsed > 0 then
 
-         self.lock_status = 'WAITED'
          -- elapsed > 0 => waited lock (other thread might have :set() the data)
-         -- perform cache_load 2
-         data, flags = _get(self, key)
-         if data then
-            -- hit2 : process cache hit
-            -- Note: there should always be data (because of positive / negative caching)
+         -- (more likely to get a HIT on cache_load 2)
+         self.lock_status = 'WAITED'
 
-            -- unlock before de-serializing cached data
-            _unlock(self)
-            data = _process_cached_data(self, data, flags)
-            return _return(self, data)
-         else
-            -- miss: weird state, but still continue onto the external_lookup
-            ngx.log(ngx.ERR, "weird state: elapsed > 0 but no data")
-         end
       else
+
          -- elapsed == 0 => immediate lock
+         -- it is less likely to get a HIT on cache_load 2
+         -- but still perform it (race condition cases)
          self.lock_status = 'IMMEDIATE'
-         -- continue to external lookup
       end
+
+      -- perform cache_load 2
+      data, flags = _get(self, key)
+      if data then
+         -- hit2 : process cache hit
+
+         self.hit2 = true
+
+         -- unlock before de-serializing cached data
+         _unlock(self)
+         data = _process_cached_data(self, data, flags)
+         return _return(self, data)
+      end
+
+      -- continue to external lookup
    end
 
+   -- mark the beginning of the critical section
+   -- (we want to wait for the data to be looked up and cached successfully)
+   _enter_critical_section(self)
+
    -- perform external lookup
-   data, err = self.callbacks.external_lookup()
+   local callbacks = self.callbacks
+   data, err = callbacks.external_lookup(callbacks.external_lookup_arg)
 
    if data then
       -- succ: save positive and return the data
@@ -393,7 +500,7 @@ local function load(self, key)
    end
 
    if DEBUG and data then
-      -- we didn't return it means it we had stale negative data
+      -- there is data, but it failed _is_empty() => stale negative data
       print('STALE_NEGATIVE data => cache as a new HIT_NEGATIVE')
    end
 

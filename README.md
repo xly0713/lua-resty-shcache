@@ -149,14 +149,15 @@ Author
 ======
 
 Matthieu Tourne <matthieu.tourne@gmail.com>
-
+Rajeev Sharma  <rajeev@cloudflare.com>
+John Graham Cumming <john@cloudflare.com>
 
 Copyright and License
 =====================
 
 This module is licensed under the BSD license.
 
-Copyright (C) 2013, by Matthieu Tourne
+Copyright (C) 2013, by CloudFlare Inc.
 
 All rights reserved.
 
