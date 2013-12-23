@@ -30,6 +30,7 @@ if conf then
    DEFAULT_ACTUALIZE_TTL = conf.DEFAULT_ACTUALIZE_TTL or DEFAULT_ACTUALIZE_TTL
 end
 
+local bit = require("bit")
 local band = bit.band
 local bor = bit.bor
 local st_format = string.format
@@ -108,7 +109,8 @@ end
 -- shdict: ngx.shared.DICT, created by the lua_shared_dict directive
 -- callbacks: see shcache state machine for user defined functions
 --    * callbacks.external_lookup is required
---    * callbacks.external_lookup_arg is the (opaque) user argument for external_lookup
+--    * callbacks.external_lookup_arg is the (opaque) user argument for
+--      external_lookup
 --    * callbacks.encode    : optional encoding before saving to shmem
 --    * callbacks.decode    : optional decoding when retreiving from shmem
 -- opts:
@@ -125,13 +127,16 @@ end
 --   * opts.negative_ttl    : save a invalid lookup for, in seconds
 --   * opts.actualize_ttl   : re-actualize a stale record for, in seconds
 --
---   * opts.lock_options    : set option to lock see : http://github.com/agentzh/lua-resty-lock
+--   * opts.lock_options    : set option to lock see:
+--                            http://github.com/agentzh/lua-resty-lock
 --                            for more details.
---   * opts.locks_shdict    : specificy the name of the shdict containing the locks
+--   * opts.locks_shdict    : specificy the name of the shdict containing
+--                            the locks
 --                            (useful if you might have locks key collisions)
 --                            uses "locks" by default.
 --   * opts.name            : if shcache object is named, it will automatically
---                            register itself in ngx.ctx.shcache (useful for logging).
+--                            register itself in ngx.ctx.shcache
+--                            (useful for logging).
 local function new(self, shdict, callbacks, opts)
    if not shdict then
       return nil, "shdict does not exist"
@@ -258,7 +263,8 @@ local function _exit_critical_section(self)
    critical_sections.count = critical_sections.count - 1
 
    if DEBUG then
-      print('die: ', critical_sections.die, ', count: ', critical_sections.count)
+      print('die: ', critical_sections.die, ', count: ',
+            critical_sections.count)
    end
 
    if critical_sections.die and critical_sections.count <= 0 then
