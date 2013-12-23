@@ -219,7 +219,7 @@ local function new(self, shdict, callbacks, opts)
 end
 M.new = new
 
-local function _enter_critical_section(self)
+local function _enter_critical_section(self, key)
    if DEBUG then
       print('Entering critical section, shcache: ', self.name or '')
    end
@@ -231,6 +231,7 @@ local function _enter_critical_section(self)
       critical_sections = {
          count = 1,
          die = false,
+         last_key = key,
       }
       ngx.ctx.critical_sections = critical_sections
       return
@@ -244,6 +245,7 @@ local function _enter_critical_section(self)
    -- end
 
    critical_sections.count = critical_sections.count + 1
+   critical_sections.last_key = key
    if DEBUG then
       print('critical sections count: ', critical_sections.count)
    end
@@ -477,7 +479,7 @@ local function load(self, key)
 
    -- mark the beginning of the critical section
    -- (we want to wait for the data to be looked up and cached successfully)
-   _enter_critical_section(self)
+   _enter_critical_section(self, key)
 
    -- perform external lookup
    local callbacks = self.callbacks
