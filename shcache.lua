@@ -275,7 +275,7 @@ local function _exit_critical_section(self)
       if DEBUG then
          print('Last critical section, exiting.')
       end
-      ngx.exit(ngx.status)
+      ngx.exit(444)
    end
 end
 
