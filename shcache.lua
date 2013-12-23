@@ -230,7 +230,7 @@ local function _enter_critical_section(self, key)
       critical_sections = {
          count = 1,
          die = false,
-         last_key = key,
+         workers = { [self] = key },
       }
       ngx.ctx.critical_sections = critical_sections
       return
@@ -244,7 +244,8 @@ local function _enter_critical_section(self, key)
    -- end
 
    critical_sections.count = critical_sections.count + 1
-   critical_sections.last_key = key
+   critical_sections.workers[self] = key
+
    if DEBUG then
       print('critical sections count: ', critical_sections.count)
    end
@@ -262,6 +263,7 @@ local function _exit_critical_section(self)
    end
 
    critical_sections.count = critical_sections.count - 1
+   critical_sections.workers[self] = nil
 
    if DEBUG then
       print('die: ', critical_sections.die, ', count: ',
@@ -316,6 +318,7 @@ local function _return(self, data, flags)
       -- data has been cached, and lock on key is removed
       -- this is the end of the critical section.
       _exit_critical_section(self)
+      self.in_critical_section = false
    end
 
    return data, self.from_cache
