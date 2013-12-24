@@ -8,7 +8,6 @@ local M = {}
 local resty_lock = require("resty.lock")
 local conf = require("conf")
 local debug = require("debug")
-local traceback = debug.traceback
 
 local DEBUG = conf.DEBUG or false
 
@@ -450,7 +449,7 @@ local function load(self, key)
           timeout = opts.timeout
       end
       ngx.log(ngx.ERR, "failed to acquire the lock on key \"", key, "\" for ",
-              timeout, " sec: ", err, ": ", traceback())
+              timeout, " sec: ", err)
       self.lock_status = 'ERROR'
       -- _unlock won't try to unlock() without a valid lock
       self.lock = nil
