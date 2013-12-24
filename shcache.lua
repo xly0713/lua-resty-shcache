@@ -7,6 +7,8 @@ local M = {}
 
 local resty_lock = require("resty.lock")
 local conf = require("conf")
+local debug = require("debug")
+local traceback = debug.traceback
 
 local DEBUG = conf.DEBUG or false
 
@@ -442,7 +444,13 @@ local function load(self, key)
    if not elapsed then
       -- failed to acquire lock, still proceed normally to external_lookup
       -- unlock() might fail.
-      ngx.log(ngx.ERR, "failed to acquire the lock: ", err)
+      local timeout
+      local opts = self.lock_options
+      if opts then
+          timeout = opts.timeout
+      end
+      ngx.log(ngx.ERR, "failed to acquire the lock on key \"", key, "\" for ",
+              timeout, " sec: ", err, ": ", traceback())
       self.lock_status = 'ERROR'
       -- _unlock won't try to unlock() without a valid lock
       self.lock = nil
