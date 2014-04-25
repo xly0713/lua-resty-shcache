@@ -117,7 +117,7 @@ Creates an shcache object which implements the caching state machine in the atta
 
 `ngx.shared.DICT` is the shared dictionnary (declared in Nginx conf by `lua_shared_dict` directive) to use
 
-`callbacks.external_lookup` is the only required function, it's the closure necessary to lookup data
+`callbacks.external_lookup` is the only required function, it's the closure necessary to lookup data. It should return the value if one exists, and optionally an error string to be logged, and/or an optional TTL value which overrides the positive_ttl option when saving a positive lookup.
 
 `callbacks.encode` and `callbacks.decode` are optional (default to identity), if you intend to store a complex
 Lua type (tables for instance), they should be declared as ngx.shared.DICT can only store text.
@@ -157,7 +157,7 @@ Copyright and License
 
 This module is licensed under the BSD license.
 
-Copyright (C) 2013, by CloudFlare Inc.
+Copyright (C) 2013-2014, by CloudFlare Inc.
 
 All rights reserved.
 

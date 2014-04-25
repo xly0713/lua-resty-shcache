@@ -181,6 +181,9 @@ local function new(self, shdict, callbacks, opts)
 
       locks_shdict = opts.lock_shdict or "locks",
 
+      -- positive ttl specified by external lookup function
+      lookup_ttl = nil,
+
       -- STATUS --
 
       from_cache = false,
@@ -349,11 +352,22 @@ local function _is_empty(data, flags)
 end
 
 -- save positive, encode the data if needed before :set()
-local function _save_positive(self, key, data)
+local function _save_positive(self, key, data, ttl)
    if DEBUG then
-      print("key: ", key, ". save positive, ttl: ", self.positive_ttl)
+      if ttl then
+         print("key: ", key, ". save positive, lookup ttl: ", ttl)
+      else
+         print("key: ", key, ". save positive, ttl: ", self.positive_ttl)
+      end
    end
+
    data = self.callbacks.encode(data)
+
+   if ttl then
+      self.lookup_ttl = ttl
+      return _set(self, key, data, ttl, HIT_POSITIVE_STATE)
+   end
+
    return _set(self, key, data, self.positive_ttl, HIT_POSITIVE_STATE)
 end
 
@@ -492,12 +506,11 @@ local function load(self, key)
 
    -- perform external lookup
    local callbacks = self.callbacks
-   data, err = callbacks.external_lookup(callbacks.external_lookup_arg)
+   data, err, ttl = callbacks.external_lookup(callbacks.external_lookup_arg)
 
    if data then
       -- succ: save positive and return the data
-
-      _save_positive(self, key, data)
+      _save_positive(self, key, data, ttl)
       return _return(self, data)
    else
       ngx.log(ngx.WARN, 'external lookup failed: ', err)
