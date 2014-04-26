@@ -143,16 +143,25 @@ local function new(self, shdict, callbacks, opts)
    end
 
    -- check that callbacks.external_lookup is set
-   if not callbacks or not callbacks.external_lookup then
-      return nil, "no external_lookup function defined"
+   if not callbacks then
+      return nil, "no callbacks argument"
    end
 
-   if not callbacks.encode then
-      callbacks.encode = _identity
+   local ext_lookup = callbacks.external_lookup
+   if not ext_lookup then
+      return nil, "no external_lookup callback specified"
    end
 
-   if not callbacks.decode then
-      callbacks.decode = _identity
+   local ext_udata = callbacks.external_lookup_arg
+
+   local encode = callbacks.encode
+   if not encode then
+      encode = _identity
+   end
+
+   local decode = callbacks.decode
+   if not decode then
+      decode = _identity
    end
 
    local opts = opts or {}
@@ -169,7 +178,11 @@ local function new(self, shdict, callbacks, opts)
 
    local obj = {
       shdict = shdict,
-      callbacks = callbacks,
+
+      encode = encode,
+      decode = decode,
+      ext_lookup = ext_lookup,
+      ext_udata = ext_udata,
 
       positive_ttl = opts.positive_ttl or DEFAULT_POSITIVE_TTL,
       negative_ttl = opts.negative_ttl or DEFAULT_NEGATIVE_TTL,
@@ -361,7 +374,7 @@ local function _save_positive(self, key, data, ttl)
       end
    end
 
-   data = self.callbacks.encode(data)
+   data = self.encode(data)
 
    if ttl then
       self.lookup_ttl = ttl
@@ -404,7 +417,7 @@ local function _process_cached_data(self, data, flags)
       -- empty cached data
       return nil
    else
-      return self.callbacks.decode(data)
+      return self.decode(data)
    end
 end
 
@@ -505,8 +518,7 @@ local function load(self, key)
    _enter_critical_section(self, key)
 
    -- perform external lookup
-   local callbacks = self.callbacks
-   data, err, ttl = callbacks.external_lookup(callbacks.external_lookup_arg)
+   data, err, ttl = self.ext_lookup(self.ext_udata)
 
    if data then
       -- succ: save positive and return the data
