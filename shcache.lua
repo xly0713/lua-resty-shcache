@@ -341,18 +341,16 @@ local function _return(self, data, flags)
    return data, self.from_cache
 end
 
-local function _set(self, ...)
+local function _set(self, key, data, ttl, flags)
    if DEBUG then
-      local key, data, ttl, flags = ...
       print("saving key: ", key, ", for: ", ttl)
    end
 
-   local ok, err, forcible = self.shdict:set(...)
+   local ok, err, forcible = self.shdict:set(key, data, ttl, flags)
 
    self.forcible_set = forcible
 
    if not ok then
-      local key, data, ttl, flags = ...
       ngx.log(ngx.ERR, 'failed to set key: ', key, ', err: ', err)
    end
 
