@@ -17,13 +17,9 @@ local DEFAULT_NEGATIVE_TTL = 2      -- cache for, failed lookup
 local DEFAULT_ACTUALIZE_TTL = 2     -- stale data, actualize data for
 
 -- default lock options, in secs
-local function _get_default_lock_options()
-   return {
-      exptime = 1,     -- max wait if failing to call unlock()
-      timeout = 0.5,   -- max waiting time of lock()
-      max_step = 0.1,  -- max sleeping interval
-   }
-end
+local DEFAULT_LOCK_EXPTIME = 1      -- max wait if failing to call unlock()
+local DEFAULT_LOCK_TIMEOUT = 0.5    -- max waiting time of lock()
+local DEFAULT_LOCK_MAXSTEP = 0.1    -- max sleeping interval
 
 if conf then
    DEFAULT_NEGATIVE_TTL = conf.DEFAULT_NEGATIVE_TTL or DEFAULT_NEGATIVE_TTL
@@ -167,11 +163,15 @@ local function new(self, shdict, callbacks, opts)
    local opts = opts or {}
 
    -- merge default lock options with the ones passed to new()
-   local lock_options = _get_default_lock_options()
-   if opts.lock_options then
-      for k, v in pairs(opts.lock_options) do
-         lock_options[k] = v
-      end
+   local lock_options = opts.lock_options or {}
+   if not lock_options.exptime then
+      lock_options.exptime = DEFAULT_LOCK_EXPTIME
+   end
+   if not lock_options.timeout then
+      lock_options.timeout = DEFAULT_LOCK_TIMEOUT
+   end
+   if not lock_options.max_step then
+      lock_options.max_step = DEFAULT_LOCK_MAXSTEP
    end
 
    local name = opts.name
@@ -518,7 +518,7 @@ local function load(self, key)
    _enter_critical_section(self, key)
 
    -- perform external lookup
-   data, err, ttl = self.ext_lookup(self.ext_udata)
+   local data, err, ttl = self.ext_lookup(self.ext_udata)
 
    if data then
       -- succ: save positive and return the data
