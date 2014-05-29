@@ -3,7 +3,7 @@
 
 -- small overlay over shdict, smart cache load mechanism
 
-local M = {}
+local _M = {}
 
 local resty_lock = require("resty.lock")
 local conf = require("conf")
@@ -94,7 +94,7 @@ local function _store_object(self, name)
 end
 
 local obj_mt = {
-   __index = M,
+   __index = _M,
 }
 
 -- default function for callbacks.encode / decode.
@@ -233,7 +233,7 @@ local function new(self, shdict, callbacks, opts)
 
    return self
 end
-M.new = new
+_M.new = new
 
 local function _enter_critical_section(self, key)
    if DEBUG then
@@ -548,6 +548,6 @@ local function load(self, key)
    _save_negative(self, key)
    return _return(self, nil)
 end
-M.load = load
+_M.load = load
 
-return M
+return _M
