@@ -287,12 +287,13 @@ local function _exit_critical_section(self)
             critical_sections.count)
    end
 
-   if critical_sections.die and critical_sections.count <= 0 then
+   local status = critical_sections.die
+   if status and critical_sections.count <= 0 then
       -- safe to exit.
       if DEBUG then
          print('Last critical section, exiting.')
       end
-      ngx.exit(444)
+      ngx.exit(status)
    end
 end
 
