@@ -3,6 +3,9 @@
 
 -- small overlay over shdict, smart cache load mechanism
 
+-- TODO (rdsharma): remove this line once we have tracked down bugs
+jit.off(true, true)
+
 local _M = {}
 
 local resty_lock = require("resty.lock")
