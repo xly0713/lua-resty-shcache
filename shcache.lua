@@ -35,11 +35,12 @@ local bor = bit.bor
 local st_format = string.format
 
 -- there are only really 5 states total
-                                 -- is_stale    is_neg  is_from_cache
-local MISS_STATE = 0             -- 0           0       0
-local HIT_POSITIVE_STATE = 1     -- 0           0       1
-local HIT_NEGATIVE_STATE = 3     -- 0           1       1
-local STALE_POSITIVE_STATE = 5   -- 1           0       1
+                                 -- is_net_err is_stable is_neg is_from_cache
+local MISS_STATE = 0             -- 0          0         0      0
+local HIT_POSITIVE_STATE = 1     -- 0          0         0      1
+local HIT_NEGATIVE_STATE = 3     -- 0          0         1      1
+local STALE_POSITIVE_STATE = 5   -- 0          1         0      1
+local NET_ERR_STATE = 8          -- 1          0         0      0
 
 -- stale negative doesn't really make sense, use HIT_NEGATIVE instead
 -- local STALE_NEGATIVE_STATE = 7   -- 1           1       1
@@ -54,6 +55,7 @@ local STATES = {
    [HIT_NEGATIVE_STATE] = 'HIT_NEGATIVE',
    [STALE_POSITIVE_STATE] = 'STALE',
    -- [STALE_NEGATIVE_STATE] = 'STALE_NEGATIVE',
+   [NET_ERR_STATE] = "NET_ERR"
 }
 
 local function get_status(flags)
@@ -526,30 +528,32 @@ local function load(self, key)
       -- succ: save positive and return the data
       _save_positive(self, key, data, ttl)
       return _return(self, data)
-   else
-      ngx.log(ngx.WARN, 'external lookup failed: ', err)
    end
 
    -- external lookup failed
-   -- attempt to load stale data
-   data, flags = _get_stale(self)
-   if data and not _is_empty(data, flags) then
-      -- hit_stale + valid (positive) data
+   ngx.log(ngx.WARN, 'external lookup failed: ', err)
 
-      flags = _save_actualize(self, key, data, flags)
-      -- unlock before de-serializing data
-      _unlock(self)
-      data = _process_cached_data(self, data, flags)
-      return _return(self, data)
+   if err then  --lookup failed because net_err
+      self.cache_state = NET_ERR_STATE
+      data, flags = _get_stale(self) -- attempt to load stale data
+      if data and not _is_empty(data, flags) then
+          -- hit_stale + valid (positive) data
+
+          flags = _save_actualize(self, key, data, flags)
+          -- unlock before de-serializing data
+          _unlock(self)
+          data = _process_cached_data(self, data, flags)
+          return _return(self, data)
+      end
+
+      if DEBUG and data then
+          -- there is data, but it failed _is_empty() => stale negative data
+          print('STALE_NEGATIVE data')
+      end
+   else --no valid data without net_err
+       _save_negative(self, key)
    end
 
-   if DEBUG and data then
-      -- there is data, but it failed _is_empty() => stale negative data
-      print('STALE_NEGATIVE data => cache as a new HIT_NEGATIVE')
-   end
-
-   -- nothing has worked, save negative and return empty
-   _save_negative(self, key)
    return _return(self, nil)
 end
 _M.load = load
