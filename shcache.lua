@@ -21,7 +21,7 @@ local DEFAULT_ACTUALIZE_TTL = 2     -- stale data, actualize data for
 
 -- default lock options, in secs
 local DEFAULT_LOCK_EXPTIME = 1      -- max wait if failing to call unlock()
-local DEFAULT_LOCK_TIMEOUT = 0.5    -- max waiting time of lock()
+local DEFAULT_LOCK_TIMEOUT = 1    -- max waiting time of lock()
 local DEFAULT_LOCK_MAXSTEP = 0.1    -- max sleeping interval
 
 if conf then
